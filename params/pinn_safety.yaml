@@ -1,0 +1,6 @@
+pinn_safety:
+  ros__parameters:
+    pinn_root: /root/Spot_sim/psbd_pinn
+    weights_path: weights/pde_0_5_poisson_unet_bilinear_model_512x512_2000_e35_normalization_bc_fix_test_best.pth
+    norm_stats_path: weights/pde_0_5_poisson_unet_bilinear_model_512x512_2000_e35_normalization_bc_fix_test_norm_stats.pt
+    dilate_map: 5
