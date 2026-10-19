@@ -1,0 +1,5 @@
+<library path="rrt_cbf_planner">
+  <class name="webots_spot_rrt_cbf/RrtCbfPlanner" type="webots_spot_rrt_cbf::RrtCbfPlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Safe CBF-RRT* global planner using a PINN Poisson safety field.</description>
+  </class>
+</library>
