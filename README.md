@@ -91,6 +91,14 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
     ```
    Default is `planner:=navfn`. See [webots_spot_rrt_cbf/README.md](webots_spot_rrt_cbf/README.md) for the benchmark and unit tests.
 
+PINN Poisson safety field `h` on the occupancy map (red = safer, blue = near obstacles):
+
+![PINN Poisson safety field h](doc/poisson_h.png)
+
+Example RRT*-CBF tree and path on the same map:
+
+![Example RRT*-CBF paths](doc/example_rrt_cbf_paths.png)
+
 ## To switch Arenas
 
 1) Change false to true in https://github.com/MASKOR/webots_ros2_spot/blob/main/resource/spot_control.urdf#L5
