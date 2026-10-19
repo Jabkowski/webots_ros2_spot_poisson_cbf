@@ -1,8 +1,8 @@
 repositories:
   webots_spot_msgs:
     type: git
-    url: https://github.com/MASKOR/webots_spot_msgs.git
-    version: main
+    url: https://github.com/Jabkowski/webots_spot_msgs_cbf.git
+    version: psbd_spot
   webots_spot_teleop:
     type: git
     url: https://github.com/MASKOR/webots_spot_teleop.git

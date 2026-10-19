@@ -34,9 +34,10 @@ The world contains apriltags, a red line to test lane follower and objects for m
 3. Pull relevant packages, install dependencies, compile, and source the workspace by using:
     ```
     cd $COLCON_WS
-    git clone https://github.com/MASKOR/webots_ros2_spot src/webots_ros2_spot
-    rosdep install --ignore-src --from-paths src -y -r
+    git clone -b psbd_spot https://github.com/Jabkowski/webots_ros2_spot_poisson_cbf src/webots_ros2_spot
     vcs import --recursive src --skip-existing --input src/webots_ros2_spot/webots_ros2_spot.repos
+    ln -s $COLCON_WS/src/webots_ros2_spot/webots_spot_rrt_cbf $COLCON_WS/src/webots_spot_rrt_cbf
+    rosdep install --ignore-src --from-paths src -y -r
     chmod +x src/webots_ros2/webots_ros2_driver/webots_ros2_driver/ros2_supervisor.py
     ```
 
@@ -72,6 +73,23 @@ Teleop keyboard:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 # OR ros2 run spot_teleop spot_teleop_keyboard for body_pose control as well
 ```
+
+## RrtCbf planner (Safe CBF-RRT* global planner)
+
+`webots_spot_rrt_cbf` is a Nav2 global planner plugin (`RrtCbf`) shipped in this repo and symlinked into `src/` in the install step. It needs the PINN safety field published by the `pinn_safety` node, which runs inference with an external PINN repo.
+
+1. Install PyTorch (CPU is enough) and numpy: `pip3 install torch numpy`
+2. Clone the PINN repo (model code and weights) and place the weights as described in its README:
+    ```
+    git clone https://github.com/Jabkowski/Poisson-Safety-Boundary-Determiner.git ~/Poisson-Safety-Boundary-Determiner
+    ```
+   `pinn_safety` imports `models.double_unet` from this repo and loads the weights files named in `params/pinn_safety.yaml` (`weights_path`, `norm_stats_path`, relative to `pinn_root`).
+3. Set `pinn_root` in `params/pinn_safety.yaml` to the absolute path of the clone (a commented example is given there). The node fails with `KeyError`/import errors if it is not set.
+4. Rebuild if needed and start navigation with the planner (`pinn_safety` is started automatically):
+    ```
+    ros2 launch webots_spot nav_launch.py set_initial_pose:=true planner:=rrt_cbf
+    ```
+   Default is `planner:=navfn`. See [webots_spot_rrt_cbf/README.md](webots_spot_rrt_cbf/README.md) for the benchmark and unit tests.
 
 ## To switch Arenas
 

@@ -1,6 +1,12 @@
 pinn_safety:
   ros__parameters:
-    pinn_root: /root/Spot_sim/psbd_pinn
+    # REQUIRED: absolute path to a local clone of the PINN repo (see README, "RrtCbf planner").
+    # Example: pinn_root: /root/Spot_sim/psbd_pinn
+    pinn_root: <path-to-PINN-repo>
     weights_path: weights/pde_0_5_poisson_unet_bilinear_model_512x512_2000_e35_normalization_bc_fix_test_best.pth
     norm_stats_path: weights/pde_0_5_poisson_unet_bilinear_model_512x512_2000_e35_normalization_bc_fix_test_norm_stats.pt
     dilate_map: 5
+    # Publish raw h + metric gradients on /pinn_safety/field (latched) for planners.
+    publish_field: true
+    # Run inference exactly once after the first /map; manual re-run via /pinn_safety/run.
+    auto_run_once: true
