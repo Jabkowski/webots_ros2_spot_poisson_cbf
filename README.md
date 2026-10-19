@@ -79,12 +79,12 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 `webots_spot_rrt_cbf` is a Nav2 global planner plugin (`RrtCbf`) shipped in this repo and symlinked into `src/` in the install step. It needs the PINN safety field published by the `pinn_safety` node, which runs inference with an external PINN repo.
 
 1. Install PyTorch (CPU is enough) and numpy: `pip3 install torch numpy`
-2. Clone the PINN repo (model code and weights) and place the weights as described in its README:
+2. Clone the PINN repo at the pinned commit (branch `pinn`). It contains the model code (`models/`) and the release weights (`results/release_weights/`) needed for inference:
     ```
-    git clone https://github.com/Jabkowski/Poisson-Safety-Boundary-Determiner.git ~/Poisson-Safety-Boundary-Determiner
+    git clone -b pinn https://github.com/Jabkowski/Poisson-Safety-Boundary-Determiner.git ~/Poisson-Safety-Boundary-Determiner
+    git -C ~/Poisson-Safety-Boundary-Determiner checkout 993cc12ece5cbec98d6a3ad66e1a1b7ba3191032
     ```
-   `pinn_safety` imports `models.double_unet` from this repo and loads the weights files named in `params/pinn_safety.yaml` (`weights_path`, `norm_stats_path`, relative to `pinn_root`).
-3. Set `pinn_root` in `params/pinn_safety.yaml` to the absolute path of the clone (a commented example is given there). The node fails with `KeyError`/import errors if it is not set.
+3. `params/pinn_safety.yaml` already expects this location (`pinn_root: ~/Poisson-Safety-Boundary-Determiner`, `~` is expanded). The weights and normalisation stats are read from `results/release_weights/` relative to `pinn_root`. If you cloned elsewhere, only change `pinn_root`. The node imports `models.double_unet` from there.
 4. Rebuild if needed and start navigation with the planner (`pinn_safety` is started automatically):
     ```
     ros2 launch webots_spot nav_launch.py set_initial_pose:=true planner:=rrt_cbf

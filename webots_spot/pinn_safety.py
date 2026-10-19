@@ -24,7 +24,7 @@ class PinnSafety(Node):
         super().__init__("pinn_safety")
 
         params = self._load_params()
-        pinn_root = params["pinn_root"]
+        pinn_root = os.path.abspath(os.path.expanduser(params["pinn_root"]))
         if pinn_root not in sys.path:
             sys.path.insert(0, pinn_root)
 
