@@ -290,12 +290,42 @@ planner_server:
   ros__parameters:
     expected_planner_frequency: 20.0
     use_sim_time: True
-    planner_plugins: [GridBased]
+    planner_plugins: [GridBased, RrtCbf]
     GridBased:
       plugin: nav2_navfn_planner/NavfnPlanner
       tolerance: 0.5
       use_astar: false
       allow_unknown: true
+    # Safe CBF-RRT* using the cached PINN safety field (/pinn_safety/field).
+    # Selected by launching nav_launch.py with planner:=rrt_cbf (BT uses planner_id RrtCbf).
+    RrtCbf:
+      plugin: "webots_spot_rrt_cbf/RrtCbfPlanner"
+      field_topic: /pinn_safety/field
+      lock_field: true          # keep first field for the whole run, no re-inference
+      require_field: true       # fail the plan until the field exists (false = plan without CBF)
+      do_cbf: true
+      max_iter: 10000
+      max_planning_time: 2.0    # s
+      step_size_m: 0.5
+      neighbor_radius_m: 1.5
+      samples_per_edge: 20
+      goal_bias: 0.05
+      # CBF condition: v * dh/ds + kappa * h > 0 with h normalised to max(h)=1.
+      # Near an obstacle this keeps roughly v / kappa metres of clearance.
+      v: 0.5
+      kappa: 2.0
+      c: 0.2                    # edge cost weight: c * length + (1 - c) / mean_h
+      h_scale: 0.0              # 0 = max of received h
+      seed_mode: fixed          # fixed | per_request
+      seed: 1
+      allow_unknown: true
+      start_clear_radius_m: 0.4
+      goal_clear_radius_m: 0.0
+      shortcut: true
+      shortcut_h_tolerance: 0.9
+      interpolation_resolution: 0.05
+      publish_tree: true
+      stats_csv_path: ""
 
 smoother_server:
   ros__parameters:

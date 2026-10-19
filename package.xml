@@ -11,6 +11,7 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
+  <exec_depend>webots_spot_msgs</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
 
   <exec_depend>builtin_interfaces</exec_depend>
@@ -27,6 +28,7 @@
 
   <exec_depend>navigation2</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>webots_spot_rrt_cbf</exec_depend>
 
   <exec_depend>moveit</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>

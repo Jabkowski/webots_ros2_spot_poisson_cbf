@@ -36,6 +36,10 @@ setup(
         ),
         (os.path.join("share", package_name, "params"), glob("params/*.yaml")),
         (os.path.join("share", package_name, "map"), glob("map/*")),
+        (
+            os.path.join("share", package_name, "behavior_trees"),
+            glob("behavior_trees/*.xml"),
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

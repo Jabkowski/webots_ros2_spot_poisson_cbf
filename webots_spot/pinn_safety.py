@@ -12,6 +12,7 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import Trigger
+from webots_spot_msgs.msg import SafetyField
 
 
 GRID_SIZE = 512
@@ -47,6 +48,11 @@ class PinnSafety(Node):
         norm_payload = torch.load(norm_stats_path, map_location="cpu")
         self._normalization_stats = norm_payload["stats"]
 
+        self._publish_field = bool(params.get("publish_field", True))
+        self._auto_run_once = bool(params.get("auto_run_once", True))
+        self._auto_run_done = False
+        self.inference_count = 0
+
         self._map_msg = None
         self.h = None
 
@@ -57,10 +63,17 @@ class PinnSafety(Node):
         )
         self.create_subscription(OccupancyGrid, "/map", self._on_map, map_qos)
         self._h_pub = self.create_publisher(OccupancyGrid, "/pinn_safety/h", map_qos)
+        # Raw h + gradients for planners. Latched so late subscribers get the
+        # single inference result without triggering a new one.
+        self._field_pub = self.create_publisher(
+            SafetyField, "/pinn_safety/field", map_qos
+        )
         self.create_service(Trigger, "run", self._on_run)
 
         self.get_logger().info(
-            "Waiting for /map. Call trigger: ros2 service call /pinn_safety/run std_srvs/srv/Trigger"
+            "Waiting for /map. "
+            f"auto_run_once={self._auto_run_once}. "
+            "Manual trigger: ros2 service call /pinn_safety/run std_srvs/srv/Trigger"
         )
 
     @staticmethod
@@ -85,6 +98,12 @@ class PinnSafety(Node):
             f"Received /map {msg.info.width}x{msg.info.height}, "
             f"resolution={msg.info.resolution:.3f}"
         )
+        if self._auto_run_once and not self._auto_run_done:
+            # Single inference at startup; later /map messages never re-run it.
+            self._auto_run_done = True
+            ok, text = self._run_inference()
+            if not ok:
+                self.get_logger().error(f"Auto-run failed: {text}")
 
     def _occupancy_to_grid(self, msg):
         raw = np.asarray(msg.data, dtype=np.int16).reshape(
@@ -105,10 +124,12 @@ class PinnSafety(Node):
 
     def _on_run(self, request, response):
         del request
+        response.success, response.message = self._run_inference()
+        return response
+
+    def _run_inference(self):
         if self._map_msg is None:
-            response.success = False
-            response.message = "No /map received yet"
-            return response
+            return False, "No /map received yet"
 
         torch = self._torch
         grid = self._occupancy_to_grid(self._map_msg)
@@ -133,27 +154,52 @@ class PinnSafety(Node):
         h_max = float(self.h.max())
         h_mean = float(self.h.mean())
 
-        self._publish_h_map(self.h, grid)
+        self.inference_count += 1
+        h_map = self._resize_h_to_map(self.h, grid.shape)
+        self._publish_h_map(h_map, grid)
+        if self._publish_field:
+            self._publish_raw_field(h_map, grid)
 
-        response.success = True
-        response.message = (
+        message = (
+            f"inference_count={self.inference_count} "
             f"dilate_map={self._dilate_map} h shape={tuple(self.h.shape)} "
             f"min={h_min:.4f} max={h_max:.4f} mean={h_mean:.4f} time={elapsed:.3f}s"
         )
-        self.get_logger().info(response.message)
-        return response
+        self.get_logger().info(message)
+        return True, message
 
-    def _publish_h_map(self, h_pred, occupancy):
+    def _resize_h_to_map(self, h_pred, shape):
+        # Model domain is 512x512; resize back to the ROS map grid so metric
+        # gradients can be computed with the true map resolution.
         torch = self._torch
         h_tensor = torch.from_numpy(h_pred)[None, None, ...]
         h_map = torch.nn.functional.interpolate(
             h_tensor,
-            size=occupancy.shape,
+            size=shape,
             mode="bilinear",
             align_corners=False,
         )
-        h_map = h_map.cpu().numpy().squeeze()
+        return h_map.cpu().numpy().squeeze()
 
+    def _publish_raw_field(self, h_map, occupancy):
+        res = float(self._map_msg.info.resolution)
+        # Raw safety value: non-negative, zero inside map obstacles.
+        h_raw = np.maximum(h_map, 0.0).astype(np.float32)
+        h_raw[occupancy >= 1.0] = 0.0
+        # Row index = y, column index = x (OccupancyGrid layout). Gradient per metre.
+        dhdy, dhdx = np.gradient(h_raw, res)
+
+        msg = SafetyField()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._map_msg.header.frame_id
+        msg.info = self._map_msg.info
+        msg.h = h_raw.astype(np.float32).flatten().tolist()
+        msg.dhdx = dhdx.astype(np.float32).flatten().tolist()
+        msg.dhdy = dhdy.astype(np.float32).flatten().tolist()
+        self._field_pub.publish(msg)
+        self.get_logger().info("Published /pinn_safety/field (raw h, dhdx, dhdy)")
+
+    def _publish_h_map(self, h_map, occupancy):
         h_min = float(h_map.min())
         h_max = float(h_map.max())
         if h_max > h_min:
