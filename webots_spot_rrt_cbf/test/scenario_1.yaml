@@ -1,0 +1,6 @@
+# scenarios.yaml
+map: map.yaml
+scenarios:
+  - name: corridor_zigzag
+    start: [0.677098, 0.239053, 0.0]    # x, y, yaw in the map frame
+    goal:  [13.2217, 1.40753, 0.0]

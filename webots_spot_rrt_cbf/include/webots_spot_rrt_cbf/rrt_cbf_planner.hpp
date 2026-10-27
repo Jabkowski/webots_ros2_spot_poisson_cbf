@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav2_core/global_planner.hpp"
@@ -68,6 +69,8 @@ class RrtCbfPlanner : public nav2_core::GlobalPlanner {
   };
 
   void declareAndLoadParameters();
+  rcl_interfaces::msg::SetParametersResult onParametersSet(
+      const std::vector<rclcpp::Parameter>& parameters);
   void onField(const webots_spot_msgs::msg::SafetyField::SharedPtr msg);
   void prepareFields(const GridGeometry& geom);
   void appendStatsCsv(const std::string& line, bool is_header);
@@ -80,6 +83,8 @@ class RrtCbfPlanner : public nav2_core::GlobalPlanner {
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   Settings cfg_;
+  std::mutex cfg_mutex_;  // cfg_ is updated by the parameter callback; createPlan copies it
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 
   // Cached safety field (set once when lock_field is true).
   std::mutex field_mutex_;

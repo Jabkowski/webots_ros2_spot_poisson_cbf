@@ -50,7 +50,9 @@ install(TARGETS rrt_cbf_planner
   RUNTIME DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
-install(PROGRAMS scripts/planner_benchmark.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/planner_benchmark.py scripts/path_capture.py
+  DESTINATION lib/${PROJECT_NAME})
+install(FILES scripts/bench_common.py DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

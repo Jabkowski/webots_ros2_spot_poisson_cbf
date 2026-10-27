@@ -126,6 +126,62 @@ void RrtCbfPlanner::declareAndLoadParameters() {
   node->get_parameter(p("stats_csv_path"), cfg_.stats_csv_path);
 }
 
+rcl_interfaces::msg::SetParametersResult RrtCbfPlanner::onParametersSet(
+    const std::vector<rclcpp::Parameter>& parameters) {
+  // Runtime-tunable subset; everything else is read once at configure.
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  Settings next;
+  {
+    std::lock_guard<std::mutex> lock(cfg_mutex_);
+    next = cfg_;
+  }
+  const std::string prefix = name_ + ".";
+  for (const auto& param : parameters) {
+    const std::string& full = param.get_name();
+    if (full.rfind(prefix, 0) != 0) continue;
+    const std::string key = full.substr(prefix.size());
+    const auto type = param.get_type();
+    const bool is_num = type == rclcpp::ParameterType::PARAMETER_DOUBLE ||
+                        type == rclcpp::ParameterType::PARAMETER_INTEGER;
+    const auto as_double = [&param, type]() {
+      return type == rclcpp::ParameterType::PARAMETER_DOUBLE
+                 ? param.as_double()
+                 : static_cast<double>(param.as_int());
+    };
+    if (key == "c" && is_num) {
+      next.c = as_double();
+      if (next.c < 0.0 || next.c > 1.0) {
+        result.successful = false;
+        result.reason = "c must be in [0, 1]";
+      }
+    } else if (key == "kappa" && is_num) {
+      next.kappa = as_double();
+    } else if (key == "v" && is_num) {
+      next.v = as_double();
+    } else if (key == "goal_bias" && is_num) {
+      next.goal_bias = as_double();
+    } else if (key == "max_planning_time" && is_num) {
+      next.max_planning_time = as_double();
+    } else if (key == "seed" && type == rclcpp::ParameterType::PARAMETER_INTEGER) {
+      next.seed = static_cast<int>(param.as_int());
+    } else if (key == "max_iter" && type == rclcpp::ParameterType::PARAMETER_INTEGER) {
+      next.max_iter = static_cast<int>(param.as_int());
+    } else if (key == "seed_mode" && type == rclcpp::ParameterType::PARAMETER_STRING) {
+      next.seed_mode = param.as_string();
+      if (next.seed_mode != "fixed" && next.seed_mode != "per_request") {
+        result.successful = false;
+        result.reason = "seed_mode must be 'fixed' or 'per_request'";
+      }
+    }
+  }
+  if (result.successful) {
+    std::lock_guard<std::mutex> lock(cfg_mutex_);
+    cfg_ = next;
+  }
+  return result;
+}
+
 void RrtCbfPlanner::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr& parent,
                               std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
                               std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros) {
@@ -140,6 +196,8 @@ void RrtCbfPlanner::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr& pa
   global_frame_ = costmap_ros_->getGlobalFrameID();
 
   declareAndLoadParameters();
+  dyn_params_handler_ = node->add_on_set_parameters_callback(
+      std::bind(&RrtCbfPlanner::onParametersSet, this, std::placeholders::_1));
 
   // Latched: one inference result is delivered to late joiners; no inference is ever requested here.
   auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable();
@@ -181,6 +239,10 @@ void RrtCbfPlanner::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr& pa
 
 void RrtCbfPlanner::cleanup() {
   RCLCPP_INFO(logger_, "Cleaning up %s", name_.c_str());
+  if (auto node = node_.lock(); node && dyn_params_handler_) {
+    node->remove_on_set_parameters_callback(dyn_params_handler_.get());
+  }
+  dyn_params_handler_.reset();
   field_sub_.reset();
   reset_srv_.reset();
   raw_path_pub_.reset();
@@ -285,6 +347,11 @@ nav_msgs::msg::Path RrtCbfPlanner::createPlan(const geometry_msgs::msg::PoseStam
                                               const geometry_msgs::msg::PoseStamped& goal) {
   std::lock_guard<std::mutex> plan_lock(plan_mutex_);
   const auto t_begin = std::chrono::steady_clock::now();
+  Settings cfg;
+  {
+    std::lock_guard<std::mutex> lock(cfg_mutex_);
+    cfg = cfg_;
+  }
 
   if (start.header.frame_id != global_frame_) {
     throw nav2_core::PlannerException("Planner will only accept start position from " +
@@ -307,7 +374,7 @@ nav_msgs::msg::Path RrtCbfPlanner::createPlan(const geometry_msgs::msg::PoseStam
     geom.origin_x = costmap->getOriginX();
     geom.origin_y = costmap->getOriginY();
     occupancy = buildOccupancy(costmap->getCharMap(), geom, nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE,
-                               cfg_.allow_unknown);
+                               cfg.allow_unknown);
   }
 
   bool have_field;
@@ -315,15 +382,15 @@ nav_msgs::msg::Path RrtCbfPlanner::createPlan(const geometry_msgs::msg::PoseStam
     std::lock_guard<std::mutex> lock(field_mutex_);
     have_field = static_cast<bool>(field_);
   }
-  if (!have_field && cfg_.do_cbf && cfg_.require_field) {
+  if (!have_field && cfg.do_cbf && cfg.require_field) {
     throw nav2_core::PlannerException(
-        "No safety field received on " + cfg_.field_topic +
+        "No safety field received on " + cfg.field_topic +
         " yet. Run: ros2 service call /pinn_safety/run std_srvs/srv/Trigger "
         "(or set require_field: false to plan without CBF)");
   }
   prepareFields(geom);
-  const bool use_cbf = cfg_.do_cbf && have_field;
-  if (cfg_.do_cbf && !have_field) {
+  const bool use_cbf = cfg.do_cbf && have_field;
+  if (cfg.do_cbf && !have_field) {
     RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
                          "No safety field available: planning without CBF (require_field=false)");
   }
@@ -333,8 +400,8 @@ nav_msgs::msg::Path RrtCbfPlanner::createPlan(const geometry_msgs::msg::PoseStam
   const double gx = goal.pose.position.x;
   const double gy = goal.pose.position.y;
 
-  clearDisc(occupancy, geom, sx, sy, cfg_.start_clear_radius_m);
-  clearDisc(occupancy, geom, gx, gy, cfg_.goal_clear_radius_m);
+  clearDisc(occupancy, geom, sx, sy, cfg.start_clear_radius_m);
+  clearDisc(occupancy, geom, gx, gy, cfg.goal_clear_radius_m);
 
   Point p_start = worldToPixel(geom, sx, sy);
   Point p_goal = worldToPixel(geom, gx, gy);
@@ -365,21 +432,21 @@ nav_msgs::msg::Path RrtCbfPlanner::createPlan(const geometry_msgs::msg::PoseStam
 
   // 3. Planner parameters in pixel units.
   safe_cbf_rrt::Params params;
-  params.c = cfg_.c;
-  params.maxIter = cfg_.max_iter;
-  params.stepSize = cfg_.step_size_m / geom.resolution;
-  params.neighborRadius = cfg_.neighbor_radius_m / geom.resolution;
-  params.samplesPerEdge = cfg_.samples_per_edge;
-  params.kappa = cfg_.kappa;
-  params.v = cfg_.v;
+  params.c = cfg.c;
+  params.maxIter = cfg.max_iter;
+  params.stepSize = cfg.step_size_m / geom.resolution;
+  params.neighborRadius = cfg.neighbor_radius_m / geom.resolution;
+  params.samplesPerEdge = cfg.samples_per_edge;
+  params.kappa = cfg.kappa;
+  params.v = cfg.v;
   params.doCbf = use_cbf;
-  params.goalBias = cfg_.goal_bias;
-  params.maxTimeMs = cfg_.max_planning_time * 1000.0;
-  params.recordTree = cfg_.publish_tree && tree_pub_ && tree_pub_->is_activated() &&
+  params.goalBias = cfg.goal_bias;
+  params.maxTimeMs = cfg.max_planning_time * 1000.0;
+  params.recordTree = cfg.publish_tree && tree_pub_ && tree_pub_->is_activated() &&
                       tree_pub_->get_subscription_count() > 0;
-  params.seed = cfg_.seed_mode == "per_request"
+  params.seed = cfg.seed_mode == "per_request"
                     ? requestSeed(sx, sy, gx, gy)
-                    : static_cast<std::uint32_t>(cfg_.seed);
+                    : static_cast<std::uint32_t>(cfg.seed);
 
   safe_cbf_rrt::Result result;
   try {
@@ -426,12 +493,12 @@ nav_msgs::msg::Path RrtCbfPlanner::createPlan(const geometry_msgs::msg::PoseStam
   const safe_cbf_rrt::EdgeChecker checker(occupancy, cached_h_, cached_dhdx_, cached_dhdy_, params);
   std::vector<Point> raw_path = result.path;
   std::vector<Point> final_px = raw_path;
-  if (cfg_.shortcut) {
-    final_px = shortcutPath(raw_path, checker, use_cbf, cfg_.shortcut_h_tolerance);
+  if (cfg.shortcut) {
+    final_px = shortcutPath(raw_path, checker, use_cbf, cfg.shortcut_h_tolerance);
   }
   const double raw_len_m = pathLengthMetres(raw_path, geom.resolution);
   const double final_len_m = pathLengthMetres(final_px, geom.resolution);
-  const auto dense_px = resamplePath(final_px, cfg_.interpolation_resolution / geom.resolution);
+  const auto dense_px = resamplePath(final_px, cfg.interpolation_resolution / geom.resolution);
 
   double h_sum = 0.0;
   double h_min = std::numeric_limits<double>::infinity();

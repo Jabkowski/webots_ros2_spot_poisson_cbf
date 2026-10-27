@@ -212,3 +212,24 @@ TEST(Planner, ShortcutKeepsValidityAndShortens) {
   for (std::size_t i = 0; i + 1 < dense.size(); ++i)
     EXPECT_LE(std::hypot(dense[i + 1][0] - dense[i][0], dense[i + 1][1] - dense[i][1]), 1.0 + 1e-9);
 }
+
+// Repeated captures rely on the seed: same seed -> same path, different seed -> different path.
+TEST(Planner, SeedControlsPathVariation) {
+  const Scene s = makeScene();
+  Params p;
+  p.doCbf = true;
+  p.c = 0.0;
+  p.v = 1.0;
+  p.kappa = 0.3;
+  p.stepSize = 3.0;
+  p.neighborRadius = 8.0;
+  p.maxIter = 4000;
+  p.seed = 11;
+  const Result a = safeCbfRrtStar({10, 10}, {90, 10}, s.occ, s.h, s.dhdx, s.dhdy, p);
+  const Result b = safeCbfRrtStar({10, 10}, {90, 10}, s.occ, s.h, s.dhdx, s.dhdy, p);
+  p.seed = 12;
+  const Result c = safeCbfRrtStar({10, 10}, {90, 10}, s.occ, s.h, s.dhdx, s.dhdy, p);
+  ASSERT_TRUE(a.found && b.found && c.found);
+  EXPECT_EQ(a.path, b.path);
+  EXPECT_NE(a.path, c.path);
+}

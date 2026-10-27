@@ -14,21 +14,18 @@ h along the path, planning wall time, and a CBF violation count
 import argparse
 import csv
 import math
-import os
 import time
 
 import numpy as np
 import rclpy
-import yaml
-from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import ComputePathToPose
-from PIL import Image
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from scipy import ndimage
 from webots_spot_msgs.msg import SafetyField
+
+from bench_common import StaticMap, compute_path, sample_grid
 
 
 class Bench(Node):
@@ -45,18 +42,11 @@ class Bench(Node):
         self.create_subscription(SafetyField, "/pinn_safety/field", self._on_field, qos)
         self.client = ActionClient(self, ComputePathToPose, "compute_path_to_pose")
 
-        spot = get_package_share_directory("webots_spot")
-        with open(os.path.join(spot, "map", "map.yaml")) as handle:
-            meta = yaml.safe_load(handle)
-        self.res = float(meta["resolution"])
-        self.origin = meta["origin"]
-        img = np.array(Image.open(os.path.join(spot, "map", meta["image"])))
-        # map_server trinary: occupied if (255 - p) / 255 > occupied_thresh
-        occupied = (255.0 - img) / 255.0 > float(meta["occupied_thresh"])
-        free = (255.0 - img) / 255.0 < float(meta["free_thresh"])
-        self.occ = np.flipud(occupied)  # row 0 = lowest y
-        self.free = np.flipud(free)
-        self.clearance = ndimage.distance_transform_edt(~self.occ) * self.res
+        self.map = StaticMap()
+        self.res = self.map.res
+        self.origin = self.map.origin
+        self.free = self.map.free
+        self.clearance = self.map.clearance
 
     def _on_field(self, msg):
         self.field_msgs += 1
@@ -71,12 +61,8 @@ class Bench(Node):
         }
 
     # --- map helpers -----------------------------------------------------------------
-    def _cell(self, x, y, res, ox, oy):
-        return (y - oy) / res - 0.5, (x - ox) / res - 0.5
-
     def _sample(self, grid, x, y, res, ox, oy):
-        r, c = self._cell(x, y, res, ox, oy)
-        return ndimage.map_coordinates(grid, [[r], [c]], order=1, mode="nearest")[0]
+        return sample_grid(grid, x, y, res, ox, oy)
 
     def sample_pairs(self, n, seed, min_clear, min_dist, max_dist):
         rng = np.random.default_rng(seed)
@@ -94,35 +80,12 @@ class Bench(Node):
         return pairs
 
     def _to_world(self, r, c):
-        return (
-            self.origin[0] + (c + 0.5) * self.res,
-            self.origin[1] + (r + 0.5) * self.res,
-        )
+        return self.map.to_world(r, c)
 
     # --- planning --------------------------------------------------------------------
     def plan(self, planner_id, start, goal):
-        goal_msg = ComputePathToPose.Goal()
-        goal_msg.planner_id = planner_id
-        goal_msg.use_start = True
-        for pose, (x, y) in ((goal_msg.start, start), (goal_msg.goal, goal)):
-            pose.header.frame_id = "map"
-            pose.pose.position.x = x
-            pose.pose.position.y = y
-            pose.pose.orientation.w = 1.0
-        t0 = time.perf_counter()
-        send = self.client.send_goal_async(goal_msg)
-        rclpy.spin_until_future_complete(self, send)
-        handle = send.result()
-        if not handle.accepted:
-            return None, time.perf_counter() - t0
-        res = handle.get_result_async()
-        rclpy.spin_until_future_complete(self, res)
-        wall = time.perf_counter() - t0
-        result = res.result().result
-        if len(result.path.poses) < 2:
-            return None, wall
-        pts = np.array([[p.pose.position.x, p.pose.position.y] for p in result.path.poses])
-        return pts, wall
+        pts, wall = compute_path(self, self.client, planner_id, start, goal)
+        return (None if pts is None else pts[:, :2]), wall
 
     def metrics(self, pts):
         seg = np.hypot(*np.diff(pts, axis=0).T)
