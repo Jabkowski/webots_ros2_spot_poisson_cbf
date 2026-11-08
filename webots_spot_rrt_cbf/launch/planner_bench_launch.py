@@ -18,7 +18,7 @@ from launch_ros.actions import Node
 
 def _setup(context, *args, **kwargs):
     spot_dir = get_package_share_directory("webots_spot")
-    map_yaml = os.path.join(spot_dir, "map", "map.yaml")
+    map_yaml = os.path.join(spot_dir, "map", "ros_maps", "map_000008.yaml")
     params_path = os.path.join(spot_dir, "params", "nav2_params.yaml")
 
     with open(params_path, "r") as handle:

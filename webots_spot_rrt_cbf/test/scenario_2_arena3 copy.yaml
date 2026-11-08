@@ -1,0 +1,6 @@
+# scenarios.yaml
+map: map_arena3.yaml
+scenarios:
+  - name: arena3_t1
+    start: [0.0, -4.0, 0]    # x, y, yaw in the map frame
+    goal:  [13.0, -4.1, 0.0]
